@@ -65,12 +65,16 @@ function GetModsList {
         [Parameter(Mandatory = $true, Position = 0)]
         [string] $url
     )
-    #че нада. 1. название сборки+
-    #2. список модов в виде ссылок на них+
-    #3. appID+
-    $WebResponse = Invoke-WebRequest -Uri $url -UseBasicParsing 
-    $html = ConvertFrom-Html -Content $WebResponse.Content 
+    #$WebResponse = Invoke-WebRequest -Uri $url -UseBasicParsing
+    $libPath = ".\HtmlAgilityPack.dll"
+    Add-Type -Path $libPath
+    $web = New-Object -TypeName "HtmlAgilityPack.HtmlWeb"
+    $dom = New-Object -TypeName "HtmlAgilityPack.HtmlDocument"
+    #$dom.Load($WebResponse.Content, [System.Text.Encoding]::UTF8)
+    $dom = $web.Load($url)
 
+    #$html = ConvertFrom-Html -Content $WebResponse.Content 
+    $html = $dom.DocumentNode
     $appinfo = ($html.SelectNodes('//div') | Where-Object { $_.HasClass('breadcrumbs') }).SelectNodes('.//a')[0] 
     $appid = $appinfo.Attributes[1].Value.split('/')[-1]
     $appname = $appinfo.InnerText.Trim();
@@ -89,12 +93,22 @@ function GetModsList {
     $tostm = [ToSteamCls]::new($appid, $boxtitle, $modslist)
     CreateFileForSteamCMD -data $tostm
 }
+function GetModsInfo {
+    param (
+        [ModCls[]] $Mods
+    )
+    $postParams = @{itemcount='1';'publishedfileids[0]'='2307494117'}
+    $YTE = Invoke-WebRequest -Uri "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/" -Method POST -UseBasicParsing -Body $postParams
+}
 #проверить есть ли игра в бесплатках //https://steamdb.info/sub/17906/apps/
 #проверить обновления для модов - смотреть файл appworkshop.. в папке контент.. есть время скачки - timetouched
 #сравнить со временем апдейта по запросу
+#https://steamapi.xpaw.me/#ISteamRemoteStorage/GetPublishedFileDetails
 #https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/?itemcount=КОЛ_ВО_&publishedfileids%5B0%5D=2307494117
 #%5B 0-номер %5D
 #get steam coll json info https://api.steampowered.com/ISteamRemoteStorage/GetCollectionDetails/v1/?collectioncount=КОЛ_ВО_КОЛЛ&publishedfileids%5B0%5D=АЙДИКОЛЛЕКЦИИ
 #GetModsList -url 
 #"https://steamcommunity.com/sharedfiles/filedetails/?edit=true&id=3314416910"
+
+#для теста https://steamcommunity.com/sharedfiles/filedetails/?l=russian&id=3298571555
 GetModsList -url $url
