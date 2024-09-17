@@ -3,6 +3,7 @@
 #2. Чекаем есть ли папка по пути с параметра (или дефолт), если есть смотрим флаг проверки апдейтов
 #2.1 Если проверять, то смотрим дату скачки (CheckDownloaded), грузим инфу по модам, составляем список к закачке (CreateFileForSteamCMD)
 #2.2 Если не проверять, то сразу составляем список к закачке (CreateFileForSteamCMD)
+#если нету директории, то сразу составляем список к закачке (CreateFileForSteamCMD)
 #3. Открываем директорию
 
 #проверить есть ли игра в бесплатках //https://steamdb.info/sub/17906/apps/
@@ -15,45 +16,31 @@
 #GetModsList -url 
 #"https://steamcommunity.com/sharedfiles/filedetails/?edit=true&id=3314416910"
 
-#для теста https://steamcommunity.com/sharedfiles/filedetails/?l=russian&id=3298571555
-param (
-    [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateScript({
-        If ($_ -match "https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)") {
-            $True
-          }
-          else {
-            Throw "$_ valid URL to mod is required"
-          }
-    })]
-    [string] $url,
-    [Parameter(Mandatory = $false, Position = 1)]
-    [string] $login,
-    [Parameter(Mandatory = $false, Position = 2)]
-    [string] $passwd,
-    [Parameter(Mandatory = $false, Position = 3)]
-    [bool] $check_updtates,
-    [Parameter(Mandatory = $false, Position = 4)]
-    [string] $dir_path
-)
-$OutputEncoding = [console]::InputEncoding = [console]::OutputEncoding = New-Object System.Text.UTF8Encoding
-[string]$rootPath = $myinvocation.MyCommand.Path | split-Path -Parent
+enum ActionMark {
+    ToDownload
+    ToUpdate
+    ToResume
+    Unknown
+}
 class ModCls {
     [string] $hreff_id
     [string] $title
     [int32] $updated_time
-    [int32] $downloaded_time
+    [int32] $downloaded_time_file
+    [ActionMark] $action
     ModCls() {
         $this.hreff_id = 
         $this.title = ""
         $this.updated_time = 0
-        $this.downloaded_time = 0
+        $this.downloaded_time_file = 0
+        $this.action = [ActionMark]::Unknown
     }
     ModCls([string] $rf, [string]$tl) {
         $this.hreff_id = $rf
         $this.title = $tl
         $this.updated_time = 0
-        $this.downloaded_time = 0
+        $this.downloaded_time_file = 0
+        $this.action = [ActionMark]::Unknown
     }
 }
 class ModCollInfo {
@@ -71,14 +58,11 @@ function GeneratePath {
         [string]$path,
         [string]$coll_label,
         [string]$appid,
-        [string][ref]$outpath_root,
-        [string][ref]$outpath_to_acf
+        [ref]$outpath_root,
+        [ref]$outpath_to_acf
     )
-    if ([string]::IsNullOrEmpty($path)) {
-        $path = $rootPath
-    }
-    $outpath_root = $path+"\$coll_label"
-    $outpath_to_acf = "$outpath_root\steamapps\workshop\appworkshop_$appid.acf"
+    $outpath_root.Value = $path + "\$coll_label"
+    $outpath_to_acf.Value = "$($outpath_root.Value)\steamapps\workshop\appworkshop_$appid.acf"
 }
 function CreateFileForSteamCMD {
     param (
@@ -90,7 +74,7 @@ function CreateFileForSteamCMD {
     if ([string]::IsNullOrEmpty($path)) {
         $path = $rootPath
     }
-    $pp = $path+"\$($data.title)"
+    $pp = $path + "\$($data.title)"
     if (-Not (Test-Path -Path $pp)) {
         New-Item -Path $path -Name $data.title -ItemType "directory"
     }
@@ -106,26 +90,26 @@ function CreateFileForSteamCMD {
     Invoke-Item "$pp\steamapps\workshop\content\$($data.appid)\"
     Remove-Item -Path ".\temp_cmd"
 }
+<#
+.SYNOPSIS
+    Вернет ModCollInfo которые находятся в запрошенной коллекции
+#>
 function GetModsList {
     param (
         [Parameter(Mandatory = $true, Position = 0)]
         [string] $url
     )
-    #$WebResponse = Invoke-WebRequest -Uri $url -UseBasicParsing
     $libPath = ".\HtmlAgilityPack.dll"
     Add-Type -Path $libPath
     $web = New-Object -TypeName "HtmlAgilityPack.HtmlWeb"
     $dom = New-Object -TypeName "HtmlAgilityPack.HtmlDocument"
-    #$dom.Load($WebResponse.Content, [System.Text.Encoding]::UTF8)
     try {
         $dom = $web.Load($url)    
     }
     catch {
         Write-Host "Download Error. Pls try again"
-        return
+        return $null
     }
-    
-    #$html = ConvertFrom-Html -Content $WebResponse.Content 
     $html = $dom.DocumentNode
     $appinfo = ($html.SelectNodes('//div') | Where-Object { $_.HasClass('breadcrumbs') }).SelectNodes('.//a')[0] 
     $appid = $appinfo.Attributes[1].Value.split('/')[-1]
@@ -142,62 +126,123 @@ function GetModsList {
         $modslist += [ModCls]::new($bu, $mod.InnerText)
     }
     Write-Host "Found $($modslist.Count) mods in collection"
-    $tostm = [ModCollInfo]::new($appid, $boxtitle, $modslist)
-    CheckUpdates -mod_coll $tostm
-    #CreateFileForSteamCMD -data $tostm
+    return  [ModCollInfo]::new($appid, $boxtitle, $modslist)
 }
 #Использовать если проверяем уже скаченное
 function CheckUpdates {
     param (
-        [ModCollInfo] $mod_coll,
-        [bool] $check_upd
+        [ModCollInfo]$mod_coll
     )
-    
-    GeneratePath 
-
-    $postParams = @{itemcount="$($Mods.Count)"}
+    $postParams = @{itemcount = "$($Mods.Count)" }
     [int]$ii = 0;
     foreach ($md in $mod_coll.Mods) {
-        $postParams += @{"publishedfileids[$ii]"="$($md.hreff_id)"}
+        $postParams += @{"publishedfileids[$ii]" = "$($md.hreff_id)" }
         $ii++;
     }
     $YTE = Invoke-WebRequest -Uri "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/" -Method POST -UseBasicParsing -Body $postParams
     $GettedInfo = ($YTE.Content | ConvertFrom-Json).response.publishedfiledetails
     foreach ($modinf in $GettedInfo) {
-        ($mod_coll.Mods | Where-Object { $_.hreff_id -eq $modinf.publishedfileid})[0].updated_time = $modinf.time_updated
+        ($mod_coll.Mods | Where-Object { $_.hreff_id -eq $modinf.publishedfileid })[0].updated_time = $modinf.time_updated
     }
-    [ModCls[]]$Mods_modify = @()
     foreach ($modinf in $mod_coll.Mods) {
-        if($modinf.updated_time -gt $modinf.downloaded_time) {
-            $Mods_modify.Add($modinf)
+        if ($modinf.updated_time -gt $modinf.downloaded_time_file) {
+            $modinf.action = [ActionMark]::ToUpdate 
+        }
+        else {
+            $modinf.action = [ActionMark]::ToResume 
+        }
+    }
+}
+function AcfToJson {
+    param (
+        [string]$path_to_acf
+    )
+    if (-Not (Test-Path -Path $path_to_acf)) {
+        Write-Host "Not found .acf file. All marked to download"
+    }
+    else {
+        $k = Get-Content $path_to_acf
+        [string]$outjson = "{`n"
+        for ($i = 0; $i -lt $k.Count; $i++) {
+            #если текущая не откр. скобка
+            $cur = $k[$i].Trim()
+            if (($i + 1) -ge $k.Count) {
+                $outjson += "}`n}"
+                return $outjson
+            }
+            $nex = $k[$i + 1].Trim()
+            if ($cur -ne '{') {
+                #если след линия не откр скобка               
+                if ($nex -ne '{') {
+                    #то "":""
+                    $a = $cur -split '\t+'
+                    $a = $a -join ': '
+                    #если не последний элемент
+                    if ($nex -ne '}') {
+                        $a += ",`n"
+                    }
+                    else {
+                        #если последний, не ставим запятую
+                        $a += "`n"
+                    }
+                    $outjson += $a
+                }
+                else {
+                    #если след открыв. скобка
+                    #то "" :\n
+                    $outjson += $cur + ":`n"
+                }
+            }
+            else {
+                $outjson += $cur + "`n"
+            }
         }
     }
 }
 function CheckDownloaded {
     param (
         [string]$path_to_acf,
-        [ModCls[]]$mods
+        [ModCollInfo]$mod_coll
     )
     if (-Not (Test-Path -Path $path_to_acf)) {
         Write-Host "Not found .acf file. All marked to download"
     }
     else {
-        $k = Get-Content -raw $path_to_acf
-        $k = $k.Insert(0,"{`n")
-        $k = $k -replace '\t*\"\n{', ('": {')
-        $k = $k -replace '\t*\"\n\t+{', ('": [' + "`n{")
-        #надо добавить теперь запятые..
-        foreach($line in Get-Content $path_to_acf) {
-            if($line -contains '{' -or $line -contains '}' ) {
-                continue
+        $json = (AcfToJson -path_to_acf $path_to_acf | ConvertFrom-Json).AppWorkshop
+        $mods_j = $json.WorkshopItemDetails
+        foreach ($mod in $mod_coll.Mods) {
+            if (-not ($mods_j.PSObject.Properties.Name -contains $mod.hreff_id)) {
+                #в файле нету записи
+                $mod.action = [ActionMark]::ToDownload
             }
-
+            else {
+                $el = ($mods_j.PSObject.Properties | Where-Object Name -Contains $mod.hreff_id)[0]
+                if ($null -ne $el) {
+                    $el = $el.Value
+                }
+                else {
+                    Write-Host "Coll check error"
+                    return
+                }
+                if ($el.manifest -ne "-1") {
+                    #записали время скачки по файлу
+                    $mod.downloaded_time_file = $el.timetouched
+                }
+                else {
+                    #файл недокачался когда то
+                    $mod.action = [ActionMark]::ToDownload   
+                }
+            }
+        }
+        #проверка модов к удалению (если нету в списке модов, но есть в файле)
+        $arr_path_to_del = New-Object System.Collections.ArrayList
+        foreach ($file_mod in $mods_j.PSObject.Properties.Name) {
+            $b = $mod_coll.Mods | Where-Object { $_.hreff_id -Contains $file_mod}
+            if($null -eq $b){
+                $arr_path_to_del.Add(($path_to_acf | Split-Path) + "\content\$($mod_coll.appid)\$($file_mod)")
+            }
         }
     }
-
     #смотрим файл appworkshop
     #WorkshopItemDetails -> id -> latest_manifest != -1 -> да - смотреть timetouched / нет - скачать
-
 }
-CheckDownloaded -path_to_acf "C:\Users\bigja\source\repos\DownloaderSteamCollection\Test_Kollektion\steamapps\workshop\appworkshop_4000.acf"
-GetModsList -url $url
