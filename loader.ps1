@@ -43,10 +43,19 @@ class ModCls {
         $this.action = [ActionMark]::Unknown
     }
 }
+class ModToDelete {
+    [string] $path
+    [string] $id
+    ModToDelete([string] $_path, [string] $_id) {
+        $this.path = $_path
+        $this.id = $_id
+    }
+}
 class ModCollInfo {
     [string] $appid
     [string] $title
     [ModCls[]] $Mods
+    [ModToDelete[]] $ToDelete
     ModCollInfo([string] $id, [string]$tl, [ModCls[]] $mds) {
         $this.appid = $id
         $this.title = $tl
@@ -69,7 +78,13 @@ function CreateFileForSteamCMD {
         [Parameter(Mandatory = $true, Position = 0)]
         [ModCollInfo] $data,
         [Parameter(Mandatory = $false, Position = 1)]
-        [string] $path   
+        [string] $path = "",
+        [Parameter(Mandatory = $false, Position = 2)]
+        [string] $stm_lgn = "anonymous",
+        [Parameter(Mandatory = $false, Position = 3)]
+        [string] $stm_passwd = "",
+        [Parameter(Mandatory = $false, Position = 4)]
+        [string] $stm_code = ""         
     )
     if ([string]::IsNullOrEmpty($path)) {
         $path = $rootPath
@@ -78,8 +93,9 @@ function CreateFileForSteamCMD {
     if (-Not (Test-Path -Path $pp)) {
         New-Item -Path $path -Name $data.title -ItemType "directory"
     }
-    [string]$script = "force_install_dir $($pp)`nlogin anonymous`n"
-    foreach ($mod in $data.Mods) {
+    [string]$script = "force_install_dir $($pp)`n"
+    $script += "login $stm_lgn $stm_passwd $stm_code`n"
+    $data.Mods | Where-Object { $_.action -eq [ActionMark]::ToUpdate -or $_.action -eq [ActionMark]::ToDownload } | ForEach-Object {
         $script += "workshop_download_item $($data.appid) $($mod.hreff_id)`n"
     }
     $script += "quit"
@@ -204,45 +220,40 @@ function CheckDownloaded {
         [string]$path_to_acf,
         [ModCollInfo]$mod_coll
     )
-    if (-Not (Test-Path -Path $path_to_acf)) {
-        Write-Host "Not found .acf file. All marked to download"
-    }
-    else {
-        $json = (AcfToJson -path_to_acf $path_to_acf | ConvertFrom-Json).AppWorkshop
-        $mods_j = $json.WorkshopItemDetails
-        foreach ($mod in $mod_coll.Mods) {
-            if (-not ($mods_j.PSObject.Properties.Name -contains $mod.hreff_id)) {
-                #в файле нету записи
-                $mod.action = [ActionMark]::ToDownload
+    $json = (AcfToJson -path_to_acf $path_to_acf | ConvertFrom-Json).AppWorkshop
+    $mods_j = $json.WorkshopItemDetails
+    foreach ($mod in $mod_coll.Mods) {
+        if (-not ($mods_j.PSObject.Properties.Name -contains $mod.hreff_id)) {
+            #в файле нету записи
+            $mod.action = [ActionMark]::ToDownload
+        }
+        else {
+            $el = ($mods_j.PSObject.Properties | Where-Object Name -Contains $mod.hreff_id)[0]
+            if ($null -ne $el) {
+                $el = $el.Value
             }
             else {
-                $el = ($mods_j.PSObject.Properties | Where-Object Name -Contains $mod.hreff_id)[0]
-                if ($null -ne $el) {
-                    $el = $el.Value
-                }
-                else {
-                    Write-Host "Coll check error"
-                    return
-                }
-                if ($el.manifest -ne "-1") {
-                    #записали время скачки по файлу
-                    $mod.downloaded_time_file = $el.timetouched
-                }
-                else {
-                    #файл недокачался когда то
-                    $mod.action = [ActionMark]::ToDownload   
-                }
+                Write-Host "Coll check error"
+                return
             }
-        }
-        #проверка модов к удалению (если нету в списке модов, но есть в файле)
-        $arr_path_to_del = New-Object System.Collections.ArrayList
-        foreach ($file_mod in $mods_j.PSObject.Properties.Name) {
-            $b = $mod_coll.Mods | Where-Object { $_.hreff_id -Contains $file_mod}
-            if($null -eq $b){
-                $arr_path_to_del.Add(($path_to_acf | Split-Path) + "\content\$($mod_coll.appid)\$($file_mod)")
+            if ($el.manifest -ne "-1") {
+                #записали время скачки по файлу
+                $mod.downloaded_time_file = $el.timetouched
+                #вставляем сразу, если что поменяем в скрипте проверки
+                $mod.action = [ActionMark]::ToResume
+            }
+            else {
+                #файл недокачался когда то
+                $mod.action = [ActionMark]::ToDownload   
             }
         }
     }
-    #смотрим файл appworkshop
-    #WorkshopItemDetails -> id -> latest_manifest != -1 -> да - смотреть timetouched / нет - скачать
+    #проверка модов к удалению (если нету в списке модов, но есть в файле)
+    $mod_coll.ToDelete = @()
+    foreach ($file_mod in $mods_j.PSObject.Properties.Name) {
+        $b = $mod_coll.Mods | Where-Object { $_.hreff_id -Contains $file_mod }
+        if ($null -eq $b) {
+            $mod_coll.ToDelete += [ModToDelete]::new(($path_to_acf | Split-Path) + "\content\$($mod_coll.appid)\$file_mod", $file_mod)
+        }
+    }
 }

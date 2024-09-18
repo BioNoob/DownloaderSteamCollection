@@ -12,15 +12,17 @@ param (
         })]
     [string] $url,
     [Parameter(Mandatory = $false, Position = 1)]
-    [string] $login,
+    [string] $dir_path,
     [Parameter(Mandatory = $false, Position = 2)]
-    [string] $passwd,
+    [string] $login,
     [Parameter(Mandatory = $false, Position = 3)]
-    [string] $steam_code,
+    [string] $passwd,
     [Parameter(Mandatory = $false, Position = 4)]
-    [bool] $check_updtates,
+    [string] $steam_code,
     [Parameter(Mandatory = $false, Position = 5)]
-    [string] $dir_path
+    [bool] $check_updtates,
+    [Parameter(Mandatory = $false, Position = 6)]
+    [bool] $delete_excess
 )
 $OutputEncoding = [console]::InputEncoding = [console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 [string]$rootPath = $myinvocation.MyCommand.Path | split-Path -Parent
@@ -39,14 +41,7 @@ $path_to_outp_acf = [string]::Empty
 GeneratePath -path $path -coll_label $modslst.title -appid $modslst.appid -outpath_root ([ref]$outp_dir) -outpath_to_acf ([ref]$path_to_outp_acf)
 if (-Not (Test-Path -Path $path_to_outp_acf)) {
     #файла нет
-    if ($check_updtates) {
-        $k = Read-Host "Check updates is enabled, but .acf not found in directory`nContinue with download all? (y/n[def])"
-        if ($k -notlike "^(y|yes|Y|YES)$") {
-            return
-        }
-    }
     foreach ($m in $modslst.Mods) {
-        <# $m is tmod$modslst.Mods item #>
         $m.action = [ActionMark]::ToDownload
     }
 }
@@ -59,11 +54,26 @@ else {
         #помечаем файлы к обновлению или пропуску
         CheckUpdates -mod_coll $modslst        
     }
-    else {
-        
-        $k = Read-Host "Check updates is disabled, .acf is found in directory`nContinue with download all? (y/n[def])"
-        if ($k -notlike "^(y|yes|Y|YES)$") {
-            return
-        }
+}
+Write-Host "Mods to Download:"
+$modslst.Mods | Where-Object { $_.action -eq [ActionMark]::ToDownload } | ForEach-Object {
+    Write-Host "$($_.hreff_id) : $($_.title)"
+}
+if ($check_updtates) {
+    Write-Host "Mods to Update:"
+    $modslst.Mods | Where-Object { $_.action -eq [ActionMark]::ToUpdate } | ForEach-Object {
+        Write-Host "$($_.hreff_id) : $($_.title)"
     }
 }
+if ($delete_excess) {
+    Write-Host "Mods id to delete:"
+    $modslst.ToDelete | ForEach-Object {
+        Write-Host "$($_.id)"
+    }
+}
+[string]$k = Read-Host "Confirm this actions? (y/n[def])"
+if ($k -notmatch "(y|yes|Y|YES)") {
+    return
+}
+CreateFileForSteamCMD -data $modslst -path $outp_dir -stm_lgn $login -stm_passwd $passwd -stm_code $steam_code
+Read-Host "And now we done!"
