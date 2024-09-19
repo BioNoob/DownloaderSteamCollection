@@ -3,7 +3,8 @@ function AcfToJson {
         [string]$path_to_acf
     )
     if (-Not (Test-Path -Path $path_to_acf)) {
-        Write-Host "Not found .acf file. All marked to download"
+        Write-Host "Not found .acf file."
+        return ""
     }
     else {
         $k = Get-Content $path_to_acf
@@ -42,5 +43,6 @@ function AcfToJson {
                 $outjson += $cur + "`n"
             }
         }
+        return $outjson
     }
 }

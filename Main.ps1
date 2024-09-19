@@ -96,10 +96,10 @@ if ($delete_excess) {
     }
 }
 #download new / update
-if([string]::IsNullOrEmpty($login)){
+if ([string]::IsNullOrEmpty($login)) {
     $login = "anonymous"
 }
-if((Get-Process | Where-Object {$_.Name -like "Steam*"}).Count -gt 0) {
+if ((Get-Process | Where-Object { $_.Name -like "Steam*" }).Count -gt 0) {
     [string]$k = Read-Host "Finded running Steam process`nRecomended close process. Continue? (y/n[def])"
     if ($k -notmatch "(y|yes|Y|YES)") {
         return

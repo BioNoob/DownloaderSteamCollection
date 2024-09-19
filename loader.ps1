@@ -97,7 +97,7 @@ function CreateFileForSteamCMD {
     $data.Mods | Where-Object { $_.action -eq [ActionMark]::ToUpdate -or $_.action -eq [ActionMark]::ToDownload } | ForEach-Object {
         $script += "workshop_download_item $($data.appid) $($_.hreff_id)`n"
         for ($i = 1; $i -lt $tries_times; $i++) {
-                    $script += "workshop_download_item $($data.appid) $($_.hreff_id) validate`n"
+            $script += "workshop_download_item $($data.appid) $($_.hreff_id) validate`n"
         }
     }
     $script += "quit"
@@ -183,7 +183,15 @@ function CheckDownloaded {
     )
     $header_1 = $rootPath + '\AcfConverter.ps1'
     . $header_1
-    $json = (AcfToJson -path_to_acf $path_to_acf | ConvertFrom-Json).AppWorkshop
+    $json_s = AcfToJson -path_to_acf $path_to_acf
+    if ([string]::IsNullOrEmpty($json_s)) {
+        Write-Host ".acf parse error`nAll mods marked to Download" 
+        $mod_coll.Mods | ForEach-Object {
+            $_.action = [ActionMark]::ToDownload
+        }
+        return
+    }
+    $json = ( $json_s | ConvertFrom-Json).AppWorkshop
     $mods_j = $json.WorkshopItemDetails
     foreach ($mod in $mod_coll.Mods) {
         if (-not ($mods_j.PSObject.Properties.Name -contains $mod.hreff_id)) {
