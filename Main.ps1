@@ -1,4 +1,5 @@
-##для теста https://steamcommunity.com/sharedfiles/filedetails/?l=russian&id=3298571555
+#GM   для теста https://steamcommunity.com/sharedfiles/filedetails/?id=3298571555
+#l4d2 для теста https://steamcommunity.com/sharedfiles/filedetails/?id=2921245893
 #MAIN
 param (
     [Parameter(Mandatory = $true, Position = 0)]
@@ -22,8 +23,17 @@ param (
     [Parameter(Mandatory = $false, Position = 5)]
     [bool] $check_updtates,
     [Parameter(Mandatory = $false, Position = 6)]
-    [bool] $delete_excess
+    [bool] $delete_excess,
+    [Parameter(Mandatory = $false, Position = 7)]
+    [int] $m,
+    [Parameter(Mandatory = $false, Position = 8)]
+    [int] $tries_times = 1
 )
+#объяснение про моды работы
+#m = 1 - создается папка на каждую коллекцию
+#m = 2 - смотрим директорию для модов, и по айдишнику игры смотрим какие моды там есть
+# аля dir/steamapps/workshop/ --.acf files
+## dir/steamapps/workshop/content/_game_id/
 $OutputEncoding = [console]::InputEncoding = [console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 [string]$rootPath = $myinvocation.MyCommand.Path | split-Path -Parent
 $header = $rootPath + '\loader.ps1'
@@ -31,7 +41,6 @@ $header = $rootPath + '\loader.ps1'
 if ([string]::IsNullOrEmpty($path)) {
     $path = $rootPath
 }
-#CheckDownloaded -path_to_acf "C:\Users\bigja\source\repos\DownloaderSteamCollection\Test_Kollektion\steamapps\workshop\appworkshop_4000.acf"
 $modslst = GetModsList -url $url
 if ($null -eq $modslst) {
     return
@@ -46,8 +55,7 @@ if (-Not (Test-Path -Path $path_to_outp_acf)) {
     }
 }
 else {
-    #файл есть. если включен апдейт, проверям на апдейт, если нет - предупреждение о замене и перекачке
-    #а еще надо проверить что все ли скачано.. а потом уже спрашивать о перезаписи
+    #файл есть. если включен апдейт, проверям на апдейт
     #пометили файлы к загрузке, или записали время последнего апдейта
     CheckDownloaded -path_to_acf $path_to_outp_acf -mod_coll $modslst
     if ($check_updtates) {
@@ -75,5 +83,27 @@ if ($delete_excess) {
 if ($k -notmatch "(y|yes|Y|YES)") {
     return
 }
-CreateFileForSteamCMD -data $modslst -path $outp_dir -stm_lgn $login -stm_passwd $passwd -stm_code $steam_code
+#delete files
+if ($delete_excess) {
+    $modslst.ToDelete | ForEach-Object {
+        if (-Not (Test-Path -Path $_.path)) {
+            Write-Host "Skipped directory, bcs dir not found"
+        }
+        else {
+            Remove-Item -Path $_.path -Recurse -Force
+            Write-Host "Deleted $($_.id) directory"
+        }
+    }
+}
+#download new / update
+if([string]::IsNullOrEmpty($login)){
+    $login = "anonymous"
+}
+if((Get-Process | Where-Object {$_.Name -like "Steam*"}).Count -gt 0) {
+    [string]$k = Read-Host "Finded running Steam process`nRecomended close process. Continue? (y/n[def])"
+    if ($k -notmatch "(y|yes|Y|YES)") {
+        return
+    }
+}
+CreateFileForSteamCMD -data $modslst -path $outp_dir -stm_lgn $login -stm_passwd $passwd -stm_code $steam_code -tries_times $tries_times
 Read-Host "And now we done!"

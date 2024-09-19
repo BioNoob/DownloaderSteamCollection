@@ -80,30 +80,37 @@ function CreateFileForSteamCMD {
         [Parameter(Mandatory = $false, Position = 1)]
         [string] $path = "",
         [Parameter(Mandatory = $false, Position = 2)]
-        [string] $stm_lgn = "anonymous",
+        [string] $stm_lgn = "",
         [Parameter(Mandatory = $false, Position = 3)]
         [string] $stm_passwd = "",
         [Parameter(Mandatory = $false, Position = 4)]
-        [string] $stm_code = ""         
+        [string] $stm_code = "",
+        [Parameter(Mandatory = $false, Position = 4)]
+        [int] $tries_times = 1
     )
-    if ([string]::IsNullOrEmpty($path)) {
-        $path = $rootPath
+    #$pp = $path + "\$($data.title)"
+    if (-Not (Test-Path -Path $path)) {
+        [void](New-Item -Path $path -Name $data.title -ItemType "directory")
     }
-    $pp = $path + "\$($data.title)"
-    if (-Not (Test-Path -Path $pp)) {
-        New-Item -Path $path -Name $data.title -ItemType "directory"
-    }
-    [string]$script = "force_install_dir $($pp)`n"
+    [string]$script = "force_install_dir $path`n"
     $script += "login $stm_lgn $stm_passwd $stm_code`n"
     $data.Mods | Where-Object { $_.action -eq [ActionMark]::ToUpdate -or $_.action -eq [ActionMark]::ToDownload } | ForEach-Object {
-        $script += "workshop_download_item $($data.appid) $($mod.hreff_id)`n"
+        $script += "workshop_download_item $($data.appid) $($_.hreff_id)`n"
+        for ($i = 1; $i -lt $tries_times; $i++) {
+                    $script += "workshop_download_item $($data.appid) $($_.hreff_id) validate`n"
+        }
     }
     $script += "quit"
-    New-Item -Path . -Name "temp_cmd" -ItemType "file" -Value $script -Force
+    [void](New-Item -Path . -Name "temp_cmd" -ItemType "file" -Value $script -Force)
     #вызвать стим с перехватом вывода, удалить временный файл (выше), открыть директорию
     $prc = Start-Process -PassThru -NoNewWindow -FilePath ".\steamcmd\steamcmd.exe" -ArgumentList "+runscript ..\temp_cmd"
     $prc.WaitForExit()
-    Invoke-Item "$pp\steamapps\workshop\content\$($data.appid)\"
+    if (-Not (Test-Path -Path "$path\steamapps\workshop\content\$($data.appid)\")) {
+        Write-Host "Something go wrong.. directory not created"
+    }
+    else {
+        Invoke-Item "$path\steamapps\workshop\content\$($data.appid)\"
+    }
     Remove-Item -Path ".\temp_cmd"
 }
 <#
@@ -169,57 +176,13 @@ function CheckUpdates {
         }
     }
 }
-function AcfToJson {
-    param (
-        [string]$path_to_acf
-    )
-    if (-Not (Test-Path -Path $path_to_acf)) {
-        Write-Host "Not found .acf file. All marked to download"
-    }
-    else {
-        $k = Get-Content $path_to_acf
-        [string]$outjson = "{`n"
-        for ($i = 0; $i -lt $k.Count; $i++) {
-            #если текущая не откр. скобка
-            $cur = $k[$i].Trim()
-            if (($i + 1) -ge $k.Count) {
-                $outjson += "}`n}"
-                return $outjson
-            }
-            $nex = $k[$i + 1].Trim()
-            if ($cur -ne '{') {
-                #если след линия не откр скобка               
-                if ($nex -ne '{') {
-                    #то "":""
-                    $a = $cur -split '\t+'
-                    $a = $a -join ': '
-                    #если не последний элемент
-                    if ($nex -ne '}') {
-                        $a += ",`n"
-                    }
-                    else {
-                        #если последний, не ставим запятую
-                        $a += "`n"
-                    }
-                    $outjson += $a
-                }
-                else {
-                    #если след открыв. скобка
-                    #то "" :\n
-                    $outjson += $cur + ":`n"
-                }
-            }
-            else {
-                $outjson += $cur + "`n"
-            }
-        }
-    }
-}
 function CheckDownloaded {
     param (
         [string]$path_to_acf,
         [ModCollInfo]$mod_coll
     )
+    $header_1 = $rootPath + '\AcfConverter.ps1'
+    . $header_1
     $json = (AcfToJson -path_to_acf $path_to_acf | ConvertFrom-Json).AppWorkshop
     $mods_j = $json.WorkshopItemDetails
     foreach ($mod in $mod_coll.Mods) {

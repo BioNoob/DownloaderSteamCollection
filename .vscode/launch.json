@@ -11,7 +11,9 @@
             "request": "launch",
             "script": "${file}",
             "args": ["-url",
-            "\"https://steamcommunity.com/sharedfiles/filedetails/?l=russian&id=3298571555\""
+            "\"https://steamcommunity.com/sharedfiles/filedetails/?id=2921245893\"",
+            "-tries_times",
+            "5"
          ]
         }
     ]
